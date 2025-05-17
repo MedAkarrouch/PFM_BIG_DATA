@@ -1,0 +1,78 @@
+version: "3.8"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.2.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.2.1
+    container_name: kafka
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop
+    container_name: kafdrop
+    ports:
+      - "9000:9000"
+    environment:
+      KAFKA_BROKER_CONNECT: "kafka:9092"
+    depends_on:
+      - kafka
+
+  producer:
+    build: ./producer
+    container_name: producer
+    depends_on:
+      - kafka
+
+  spark-master:
+    build: ./spark
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+    depends_on:
+      - kafka
+      - mongodb
+    ports:
+      - "4040:4040" # For Spark web UI access
+
+  mongodb:
+    image: mongo:6
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+
+  # flask:
+  #   build: ./flask
+  #   container_name: flask
+  #   ports:
+  #     - "5000:5000"
+  #   depends_on:
+  #     - mongodb
+  node:
+    build: ./node
+    container_name: node
+    depends_on:
+      - kafka
+      - mongodb
+    ports:
+      - "5000:5000"
+
+  react:
+    build: ./react
+    container_name: react
+    ports:
+      - "3000:3000"
+    depends_on:
+      - node
