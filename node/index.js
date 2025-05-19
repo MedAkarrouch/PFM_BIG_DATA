@@ -1,4 +1,5 @@
 const { Kafka } = require("kafkajs")
+const cors = require("cors")
 const express = require("express")
 const http = require("http")
 const { Server } = require("socket.io")
@@ -49,12 +50,13 @@ async function main() {
   const app = express()
   const server = http.createServer(app)
   const io = new Server(server, { cors: { origin: "*" } })
+  app.use(cors({ origin: "*" }))
 
   const collection = await initMongo()
 
   // REST endpoint for last 10
   app.get("/history", async (req, res) => {
-    const docs = await collection.find().sort({ _id: -1 }).limit(10).toArray()
+    const docs = await collection.find().sort({ _id: -1 }).toArray()
     docs.forEach((d) => (d._id = d._id.toHexString()))
     res.json(docs)
   })

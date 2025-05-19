@@ -1,31 +1,25 @@
-import { useEffect, useState } from "react"
-import { io } from "socket.io-client"
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate
+} from "react-router-dom"
+import RealTimeDashboard from "./pages/RealTimeDashboard"
+import StaticDashboard from "./pages/StaticDashboard"
 
 function App() {
-  const [reviews, setReviews] = useState([])
-
-  useEffect(() => {
-    const socket = io("http://localhost:5000")
-    socket.on("connect", () => console.log("✓ connected to socket-service"))
-    socket.on("new_review", (data) => {
-      console.log("📡 new_review", data)
-      setReviews((r) => [data, ...r])
-    })
-    return () => socket.disconnect()
-  }, [])
-
   return (
-    <div>
-      <h1>Live Reviews</h1>
-      <ul>
-        {reviews.map((r, i) => (
-          <li key={i}>
-            <strong>{r.reviewerName}</strong>: {r.reviewText} —{" "}
-            <em>{r.sentiment}</em>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <Router>
+      <Routes>
+        <Route path="/" element={<Navigate to="/real-time" />} />
+        <Route path="/real-time" element={<RealTimeDashboard />} />
+        <Route path="/static" element={<StaticDashboard />} />
+        <Route
+          path="*"
+          element={<div className="p-4 text-red-600">404 Not Found</div>}
+        />
+      </Routes>
+    </Router>
   )
 }
 
