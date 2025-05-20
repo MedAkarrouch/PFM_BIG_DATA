@@ -3,19 +3,122 @@ import { useState } from "react"
 import { Card, CardContent } from "../../ui/Card"
 
 function ReviewsTable({ reviews }) {
-  const [currentPage, setCurrentPage] = useState(1)
-  const rowsPerPage = 10
-  const indexOfLast = currentPage * rowsPerPage
-  const indexOfFirst = indexOfLast - rowsPerPage
-  const currentRows = reviews.slice(indexOfFirst, indexOfLast)
-  const totalPages = Math.ceil(reviews.length / rowsPerPage)
+  const [visibleCount, setVisibleCount] = useState(10)
+  const [searchProductId, setSearchProductId] = useState("")
+  const [searchReviewerName, setSearchReviewerName] = useState("")
+  const [sentimentFilter, setSentimentFilter] = useState("")
+  const years = [
+    ...new Set(
+      reviews.map((r) => new Date(r.unixReviewTime * 1000).getFullYear())
+    )
+  ].sort()
+  const [yearFilter, setYearFilter] = useState("")
+
+  const filtered = reviews.filter((r) => {
+    const matchProduct = (r.asin || "")
+      .toLowerCase()
+      .includes(searchProductId.toLowerCase())
+    const matchReviewer = (r.reviewerName || "")
+      .toLowerCase()
+      .includes(searchReviewerName.toLowerCase())
+    const matchSentiment = sentimentFilter
+      ? r.sentiment === sentimentFilter
+      : true
+    const matchYear = yearFilter
+      ? new Date(r.unixReviewTime * 1000).getFullYear() === Number(yearFilter)
+      : true
+    return matchProduct && matchReviewer && matchSentiment && matchYear
+  })
+
+  const visibleRows = filtered.slice(0, visibleCount)
+  const hasMore = visibleCount < filtered.length
+
+  const handleExportCSV = () => {
+    const header = [
+      "Reviewer",
+      "Product ID",
+      "Summary",
+      "Sentiment",
+      "Reviewed At"
+    ]
+    const rows = filtered.map((r) => [
+      r.reviewerName,
+      r.asin,
+      r.summary,
+      r.sentiment,
+      new Date(r.reviewed_at).toLocaleString()
+    ])
+    const csvContent = [header, ...rows]
+      .map((row) =>
+        row.map((field) => `"${String(field).replace(/"/g, '""')}"`).join(",")
+      )
+      .join("\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    link.href = URL.createObjectURL(blob)
+    link.setAttribute("download", "reviews_export.csv")
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
 
   return (
     <Card className="mt-6">
       <CardContent className="overflow-auto p-4">
-        <h3 className="text-lg font-semibold mb-3 text-gray-800">
-          Review Entries
-        </h3>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold text-gray-800">
+            Review Entries
+          </h3>
+          <button
+            onClick={handleExportCSV}
+            className="px-3 py-1.5 bg-green-500 text-white text-sm rounded hover:bg-green-600 transition"
+          >
+            Export CSV
+          </button>
+        </div>
+
+        {/* Filter Inputs */}
+        <div className="flex flex-wrap gap-4 mb-4">
+          <input
+            type="text"
+            placeholder="Filter by Product ID"
+            value={searchProductId}
+            onChange={(e) => setSearchProductId(e.target.value)}
+            className="px-3 py-1.5 border border-gray-300 rounded-md text-sm w-full md:w-60"
+          />
+          <input
+            type="text"
+            placeholder="Filter by Reviewer Name"
+            value={searchReviewerName}
+            onChange={(e) => setSearchReviewerName(e.target.value)}
+            className="px-3 py-1.5 border border-gray-300 rounded-md text-sm w-full md:w-60"
+          />
+          <select
+            value={sentimentFilter}
+            onChange={(e) => setSentimentFilter(e.target.value)}
+            className="px-3 py-1.5 border border-gray-300 rounded-md text-sm w-full md:w-60"
+          >
+            <option value="">All Sentiments</option>
+            <option value="positive">Positive</option>
+            <option value="neutral">Neutral</option>
+            <option value="negative">Negative</option>
+          </select>
+          <select
+            value={yearFilter}
+            onChange={(e) => setYearFilter(e.target.value)}
+            className="px-3 py-1.5 border border-gray-300 rounded-md text-sm w-full md:w-60"
+          >
+            <option value="">All Years</option>
+            {years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Table */}
         <table className="w-full text-sm text-left border border-gray-300">
           <thead className="bg-gray-100 text-gray-700">
             <tr>
@@ -27,7 +130,7 @@ function ReviewsTable({ reviews }) {
             </tr>
           </thead>
           <tbody>
-            {currentRows.map((r, i) => (
+            {visibleRows.map((r, i) => (
               <tr key={i} className="border-t hover:bg-gray-50">
                 <td className="px-3 py-2 border whitespace-nowrap font-medium">
                   {r.reviewerName}
@@ -57,21 +160,17 @@ function ReviewsTable({ reviews }) {
           </tbody>
         </table>
 
-        <div className="flex justify-center mt-4 gap-2">
-          {Array.from({ length: totalPages }, (_, i) => (
+        {/* Load More Button */}
+        {hasMore && (
+          <div className="flex justify-center mt-4">
             <button
-              key={i}
-              onClick={() => setCurrentPage(i + 1)}
-              className={`px-3 py-1 border rounded font-medium transition-all duration-200 ${
-                currentPage === i + 1
-                  ? "bg-blue-500 text-white border-blue-600"
-                  : "bg-white text-gray-800 hover:bg-gray-100"
-              }`}
+              onClick={() => setVisibleCount((prev) => prev + 10)}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
             >
-              {i + 1}
+              Load More
             </button>
-          ))}
-        </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
