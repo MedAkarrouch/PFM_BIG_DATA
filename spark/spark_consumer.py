@@ -1,115 +1,226 @@
+#!/usr/bin/env python
+"""
+spark_app.py  –  Train once, then stream Kafka forever
+"""
+
+import os
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, from_json, udf, to_json, struct
+from pyspark.sql.functions import col, from_json, to_json, struct, when
 from pyspark.sql.types import StructType, StringType, DoubleType
-import random
+from pyspark.ml import Pipeline, PipelineModel
+from pyspark.ml.feature import Tokenizer, StopWordsRemover, CountVectorizer, IDF
+from pyspark.ml.classification import RandomForestClassifier
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 
-# 1. Create Spark session
-spark = SparkSession.builder \
-    .appName("KafkaToKafkaClean") \
+# ----------------------------------------------------------------------
+# 0. Spark session
+# ----------------------------------------------------------------------
+spark = (
+    SparkSession.builder
+    .appName("Train-and-Serve-RF")
     .getOrCreate()
-
-# 2. Define random sentiment generator
-def random_sentiment():
-    return random.choice(["positive", "neutral", "negative"])
-
-sentiment_udf = udf(random_sentiment, StringType())
-
-# 3. Define the schema of the review JSON
-schema = StructType() \
-    .add("reviewerID", StringType()) \
-    .add("asin", StringType()) \
-    .add("reviewerName", StringType()) \
-    .add("helpful", StringType()) \
-    .add("reviewText", StringType()) \
-    .add("overall", DoubleType()) \
-    .add("summary", StringType()) \
-    .add("unixReviewTime", StringType()) \
-    .add("reviewTime", StringType()) \
-    .add("reviewed_at", StringType())
-
-# 4. Read Kafka stream from topic "reviews"
-raw_reviews = spark.readStream.format("kafka") \
-    .option("kafka.bootstrap.servers", "kafka:9092") \
-    .option("subscribe", "reviews") \
-    .option("startingOffsets", "earliest") \
-    .load()
-
-# 5. Parse the Kafka value column as JSON into structured data
-parsed_reviews = raw_reviews.select(
-    from_json(col("value").cast("string"), schema).alias("data")
 )
 
-# 6. Add sentiment column
-enriched_reviews = parsed_reviews.select("data.*") \
-    .withColumn("sentiment", sentiment_udf())
+# ---------- paths (adapt if you mount elsewhere) ----------------------
+TRAIN_PATH = "/data/train.json"
+VAL_PATH   = "/data/val.json"
+TEST_PATH  = "/data/test.json"          # only for offline metrics; optional
+# ----------------------------------------------------------------------
 
-# 7. Convert to JSON for output
-kafka_output = enriched_reviews.select(
-    to_json(struct("*")).alias("value")
+# ----------------------------------------------------------------------
+# 1. TRAIN THE MODEL  (batch job runs once)
+# ----------------------------------------------------------------------
+print(f"📥  Reading training set   {TRAIN_PATH}")
+train_df = spark.read.json(TRAIN_PATH)
+
+tokenizer  = Tokenizer(inputCol="full_review", outputCol="words")
+stopwords  = StopWordsRemover(inputCol="words", outputCol="filtered")
+vectorizer = CountVectorizer(inputCol="filtered", outputCol="raw_features",
+                             vocabSize=10_000, minDF=5)
+idf        = IDF(inputCol="raw_features", outputCol="features")
+rf         = RandomForestClassifier(labelCol="label",
+                                    featuresCol="features",
+                                    numTrees=100, maxDepth=20, seed=42)
+
+pipeline   = Pipeline(stages=[tokenizer, stopwords, vectorizer, idf, rf])
+
+print("🛠  Fitting model …")
+model: PipelineModel = pipeline.fit(train_df)
+print("✅ Model trained")
+
+# --- OPTIONAL quick metrics ------------------------------------------
+for split_name, path in [("val", VAL_PATH), ("test", TEST_PATH)]:
+    if not spark._jsparkSession.sessionState().conf().contains("spark.driver.userClassPathFirst"):
+        pass  # silence formatting bug in bitnami image
+    try:
+        df = spark.read.json(path)
+        acc = MulticlassClassificationEvaluator(
+                labelCol="label", predictionCol="prediction", metricName="accuracy"
+              ).evaluate(model.transform(df))
+        print(f"⭐ Accuracy on {split_name}: {acc:.3f}")
+    except Exception:
+        pass
+# ----------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
+# 2. STREAM FROM KAFKA  –  reuse the same model object
+# ----------------------------------------------------------------------
+BOOTSTRAP = "kafka:9092,kafka2:9092,kafka3:9092,kafka4:9092"
+SOURCE    = "reviews"
+TARGET    = "predicted-reviews"
+
+schema = (
+    StructType()
+        .add("reviewerID",     StringType())
+        .add("asin",           StringType())
+        .add("reviewerName",   StringType())
+        .add("helpful",        StringType())
+        .add("reviewText",     StringType())   # raw text
+        .add("overall",        DoubleType())
+        .add("summary",        StringType())
+        .add("unixReviewTime", StringType())
+        .add("reviewTime",     StringType())
+        .add("reviewed_at",    StringType())
 )
 
-# 8. Write results to new Kafka topic "predicted-reviews"
-kafka_output.writeStream \
-    .format("kafka") \
-    .option("kafka.bootstrap.servers", "kafka:9092") \
-    .option("topic", "predicted-reviews") \
-    .option("checkpointLocation", "/tmp/kafka-checkpoint") \
-    .outputMode("append") \
-    .start() \
-    .awaitTermination()
+raw = (
+    spark.readStream.format("kafka")
+         .option("kafka.bootstrap.servers", BOOTSTRAP)
+         .option("subscribe", SOURCE)
+         .option("startingOffsets", "latest")
+         .load()
+)
+
+parsed = raw.select(
+    from_json(col("value").cast("string"), schema).alias("d")
+).select("d.*")
+
+inference_df = parsed.withColumnRenamed("reviewText", "full_review")
+
+predicted = model.transform(inference_df)
+
+labeled = predicted.withColumn(
+    "sentiment",
+    when(col("prediction") == 0, "positive")
+    .when(col("prediction") == 1, "negative")
+    .otherwise("neutral")
+)
+
+query = (
+    labeled.select(to_json(struct("*")).alias("value"))
+           .writeStream
+           .format("kafka")
+           .option("kafka.bootstrap.servers", BOOTSTRAP)
+           .option("topic", TARGET)
+           .option("checkpointLocation", "/tmp/kafka-checkpoint")
+           .outputMode("append")
+           .start()
+)
+
+print("🚀 Streaming started — waiting for data …")
+query.awaitTermination()
+
+
+
 
 
 # from pyspark.sql import SparkSession
-# from pyspark.sql.functions import col, from_json, udf, to_json, struct
+# from pyspark.sql.functions import col, from_json, to_json, struct, when
 # from pyspark.sql.types import StructType, StringType, DoubleType
-# import random
+# from pyspark.ml import PipelineModel
+# import os
 
-# # 1. Spark session (no Mongo config anymore)
-# spark = SparkSession.builder \
-#     .appName("KafkaToKafka") \
+# # -------------------------------------------------------------
+# # 1. Spark session
+# # -------------------------------------------------------------
+# spark = (
+#     SparkSession.builder
+#     .appName("Kafka-Reviews-Predict")
 #     .getOrCreate()
+# )
 
-# # 2. Define a random sentiment function and UDF
-# def random_sentiment():
-#     return random.choice(["positive", "neutral", "negative"])
+# # -------------------------------------------------------------
+# # 2. Load the saved PipelineModel
+# #    (copied into the image at /app/model – see Dockerfile below)
+# # -------------------------------------------------------------
+# MODEL_PATH = os.getenv("MODEL_PATH", "/opt/spark-model")
+# model = PipelineModel.load(MODEL_PATH)
 
-# sentiment_udf = udf(random_sentiment, StringType())
+# # MODEL_PATH = "/app/model"
+# # model = PipelineModel.load(MODEL_PATH)
+# print(f"✅ Loaded model from {MODEL_PATH}")
 
-# # 3. Review schema
-# schema = StructType() \
-#     .add("reviewerID", StringType()) \
-#     .add("asin", StringType()) \
-#     .add("reviewText", StringType()) \
-#     .add("summary", StringType()) \
-#     .add("overall", DoubleType()) \
-#     .add("reviewerName", StringType()) \
-#     .add("reviewTime", StringType())
+# # -------------------------------------------------------------
+# # 3. Review schema coming from the producer
+# # -------------------------------------------------------------
+# schema = (
+#     StructType()
+#         .add("reviewerID",      StringType())
+#         .add("asin",            StringType())
+#         .add("reviewerName",    StringType())
+#         .add("helpful",         StringType())
+#         .add("reviewText",      StringType())      # ← the text we’ll classify
+#         .add("overall",         DoubleType())
+#         .add("summary",         StringType())
+#         .add("unixReviewTime",  StringType())
+#         .add("reviewTime",      StringType())
+#         .add("reviewed_at",     StringType())
+# )
 
-# # 4. Read from Kafka topic "reviews"
-# df = spark.readStream.format("kafka") \
-#     .option("kafka.bootstrap.servers", "kafka:9092") \
-#     .option("subscribe", "reviews") \
-#     .option("startingOffsets", "earliest") \
-#     .load()
+# BOOTSTRAP   = "kafka:9092,kafka2:9092,kafka3:9092,kafka4:9092"
+# SOURCE_TOP  = "reviews"
+# TARGET_TOP  = "predicted-reviews"
 
-# # 5. Parse value as JSON
-# json_df = df.selectExpr("CAST(value AS STRING) as json")
+# # -------------------------------------------------------------
+# # 4. Read the “reviews” topic
+# # -------------------------------------------------------------
+# raw_reviews = (
+#     spark.readStream.format("kafka")
+#          .option("kafka.bootstrap.servers", BOOTSTRAP)
+#          .option("subscribe", SOURCE_TOP)
+#          .option("startingOffsets", "earliest")
+#          .load()
+# )
 
-# # 6. Extract fields from JSON
-# parsed_df = json_df.select(from_json(col("json"), schema).alias("data")).select("data.*")
+# parsed = raw_reviews.select(
+#     from_json(col("value").cast("string"), schema).alias("data")
+# ).select("data.*")
 
-# # 7. Add random sentiment column
-# with_sentiment_df = parsed_df.withColumn("sentiment", sentiment_udf())
+# # -------------------------------------------------------------
+# # 5. Prepare the column the model expects (“full_review”)
+# # -------------------------------------------------------------
+# inference_df = parsed.withColumnRenamed("reviewText", "full_review")
 
-# # 8. Convert to JSON format for Kafka output
-# kafka_ready = with_sentiment_df.select(to_json(struct("*")).alias("value"))
+# # -------------------------------------------------------------
+# # 6. Run the model → add “prediction” (double) & “probability”
+# # -------------------------------------------------------------
+# predicted = model.transform(inference_df)
 
-# # 9. Write to new Kafka topic
-# kafka_ready.writeStream \
-#     .format("kafka") \
-#     .option("kafka.bootstrap.servers", "kafka:9092") \
-#     .option("topic", "predicted-reviews") \
-#     .option("checkpointLocation", "/tmp/kafka-checkpoint") \
-#     .outputMode("append") \
-#     .start() \
-#     .awaitTermination()
+# # -------------------------------------------------------------
+# # 7. Map numeric prediction → string label
+# #    0 = positive, 1 = negative, 2 = neutral  (from your training script)
+# # -------------------------------------------------------------
+# labeled = predicted.withColumn(
+#     "sentiment",
+#     when(col("prediction") == 0, "positive")
+#     .when(col("prediction") == 1, "negative")
+#     .otherwise("neutral")
+# )
+
+# # -------------------------------------------------------------
+# # 8. Ship everything (or only selected cols) back to Kafka
+# # -------------------------------------------------------------
+# out = labeled.select(
+#     to_json(struct("*")).alias("value")
+# )
+
+# (
+#     out.writeStream
+#        .format("kafka")
+#        .option("kafka.bootstrap.servers", BOOTSTRAP)
+#        .option("topic", TARGET_TOP)
+#        .option("checkpointLocation", "/tmp/kafka-checkpoint")  # must be on a writable volume
+#        .outputMode("append")
+#        .start()
+#        .awaitTermination()
+# )

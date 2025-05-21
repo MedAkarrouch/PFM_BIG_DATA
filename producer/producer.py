@@ -9,7 +9,13 @@ def wait_for_kafka():
     while True:
         try:
             producer = KafkaProducer(
-                bootstrap_servers='kafka:9092',
+                # bootstrap_servers='kafka:9092',
+                bootstrap_servers=[
+                    'kafka:9092',
+                    'kafka2:9092',
+                    'kafka3:9092',
+                    'kafka4:9092'
+                ],
                 value_serializer=lambda v: json.dumps(v).encode('utf-8'),
                 key_serializer=lambda k: str(k).encode('utf-8')
             )
@@ -17,7 +23,7 @@ def wait_for_kafka():
             return producer
         except NoBrokersAvailable:
             print("⏳ Kafka not available yet, retrying...")
-            time.sleep(5)
+            time.sleep(10)
 
 # wait for Kafka to be ready
 time.sleep(10)
