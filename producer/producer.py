@@ -25,8 +25,6 @@ def wait_for_kafka():
             print("⏳ Kafka not available yet, retrying...")
             time.sleep(10)
 
-# wait for Kafka to be ready
-time.sleep(10)
 producer = wait_for_kafka()
 
 # load reviews
@@ -34,7 +32,7 @@ with open('reviews.json') as f:
     reviews = json.load(f)
 
 RATE = 5     # messages per batch
-DELAY = 2    # seconds between batches
+DELAY = 3    # seconds between batches
 
 # send in bursts
 for i in range(0, len(reviews), RATE):

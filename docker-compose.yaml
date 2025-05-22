@@ -123,8 +123,8 @@ services:
       - "7077:7077"
       - "8080:8080" # For Spark master web UI access
     volumes:
-      # - ./spark/model:/opt/spark-model:ro
-      - ./data:/data:ro
+      - ./model:/opt/spark-model:ro
+      # - ./data:/data:ro
   spark-worker-1:
     image: bitnami/spark:3.3.2
     container_name: spark-worker-1
@@ -134,8 +134,8 @@ services:
     depends_on:
       - spark-master
     volumes:
-      # - ./spark/model:/opt/spark-model:ro
-      - ./data:/data:ro
+      - ./model:/opt/spark-model:ro
+      # - ./data:/data:ro
   spark-worker-2:
     image: bitnami/spark:3.3.2
     container_name: spark-worker-2
@@ -145,8 +145,8 @@ services:
     depends_on:
       - spark-master
     volumes:
-      # - ./spark/model:/opt/spark-model:ro
-      - ./data:/data:ro
+      - ./model:/opt/spark-model:ro
+      # - ./data:/data:ro
   spark-worker-3:
     image: bitnami/spark:3.3.2
     container_name: spark-worker-3
@@ -156,8 +156,8 @@ services:
     depends_on:
       - spark-master
     volumes:
-      # - ./spark/model:/opt/spark-model:ro
-      - ./data:/data:ro
+      - ./model:/opt/spark-model:ro
+      # - ./data:/data:ro
   spark-worker-4:
     image: bitnami/spark:3.3.2
     container_name: spark-worker-4
@@ -167,8 +167,8 @@ services:
     depends_on:
       - spark-master
     volumes:
-      # - ./spark/model:/opt/spark-model:ro
-      - ./data:/data:ro
+      - ./model:/opt/spark-model:ro
+      # - ./data:/data:ro
   spark-worker-5:
     image: bitnami/spark:3.3.2
     container_name: spark-worker-5
@@ -178,8 +178,8 @@ services:
     depends_on:
       - spark-master
     volumes:
-      # - ./spark/model:/opt/spark-model:ro
-      - ./data:/data:ro
+      - ./model:/opt/spark-model:ro
+      # - ./data:/data:ro
 
   mongodb:
     image: mongo:6

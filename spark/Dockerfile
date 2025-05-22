@@ -43,14 +43,14 @@ CMD ["/bin/bash","-c", \
 # COPY spark_consumer.py .
 
 # use the JSON-form CMD so quoting is painless
-CMD ["/bin/bash","-c", \
-     "/opt/bitnami/scripts/spark/run.sh & \
-      sleep 20 && \
-      /opt/bitnami/spark/bin/spark-submit \
-          --master spark://spark-master:7077 \
-          --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.2 \
-          /app/spark_consumer.py" \
-]
+# CMD ["/bin/bash","-c", \
+#      "/opt/bitnami/scripts/spark/run.sh & \
+#       sleep 20 && \
+#       /opt/bitnami/spark/bin/spark-submit \
+#           --master spark://spark-master:7077 \
+#           --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.2 \
+#           /app/spark_consumer.py" \
+# ]
 
 
 # FROM bitnami/spark:3.3.2
