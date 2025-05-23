@@ -8,7 +8,7 @@ const { MongoClient } = require("mongodb")
 const MONGO_URI = "mongodb://mongodb:27017"
 const DB_NAME = "reviewsdb"
 const COLL_NAME = "reviews"
-// const KAFKA_BROKERS = ["kafka:9092"]
+
 const KAFKA_BROKERS = [
   "kafka:9092",
   "kafka2:9092",
